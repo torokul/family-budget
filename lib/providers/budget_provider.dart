@@ -2,33 +2,42 @@ import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
 import '../models/category.dart';
 import '../models/transaction.dart' as m;
-import '../models/budget_limit.dart';
+import '../models/plan.dart';
+import '../models/group.dart';
+import '../models/construction_section.dart';
+import '../models/construction_item.dart';
 import '../services/currency_service.dart';
 
 class BudgetProvider extends ChangeNotifier {
   final _db  = DatabaseHelper.instance;
   final _cur = CurrencyService.instance;
 
-  List<Category>     _categories   = [];
-  List<m.Transaction> _transactions = [];
-  List<BudgetLimit>  _limits       = [];
-  Map<String, double> _rates       = CurrencyService.defaults;
+  List<Group>              _groups       = [];
+  List<Category>           _categories   = [];
+  List<m.Transaction>      _transactions = [];
+  List<Plan>               _plans        = [];
+  List<ConstructionSection> _cSections   = [];
+  Map<int, double>         _cTotals      = {};
+  Map<String, double>      _rates        = CurrencyService.defaults;
 
   DateTime _from = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _to   = DateTime(DateTime.now().year, DateTime.now().month + 1, 0, 23, 59, 59);
   String? _typeFilter;
 
-  List<Category>      get categories   => _categories;
-  List<m.Transaction> get transactions => _transactions;
-  List<BudgetLimit>   get limits       => _limits;
-  Map<String, double> get rates        => _rates;
-  DateTime            get from         => _from;
-  DateTime            get to           => _to;
+  List<Group>              get groups       => _groups;
+  List<Category>           get categories   => _categories;
+  List<m.Transaction>      get transactions => _transactions;
+  List<Plan>               get plans        => _plans;
+  List<ConstructionSection> get cSections   => _cSections;
+  Map<int, double>         get cTotals      => _cTotals;
+  Map<String, double>      get rates        => _rates;
+  DateTime                 get from         => _from;
+  DateTime                 get to           => _to;
 
   double toKgs(double amount, String currency) =>
       amount * (_rates[currency] ?? 1.0);
 
-  double get totalIncome => _transactions
+  double get totalIncome  => _transactions
       .where((t) => t.type == 'income')
       .fold(0, (s, t) => s + toKgs(t.amount, t.currency));
 
@@ -40,14 +49,21 @@ class BudgetProvider extends ChangeNotifier {
 
   Future<void> init() async {
     await loadRates();
+    await loadGroups();
     await loadCategories();
     await loadTransactions();
-    await loadLimits();
+    await loadPlans();
+    await loadConstruction();
   }
 
   Future<void> loadRates({bool forceRefresh = false}) async {
     final result = await _cur.getRates(forceRefresh: forceRefresh);
     _rates = result.rates;
+    notifyListeners();
+  }
+
+  Future<void> loadGroups() async {
+    _groups = await _db.getGroups();
     notifyListeners();
   }
 
@@ -62,8 +78,15 @@ class BudgetProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadLimits() async {
-    _limits = await _db.getBudgetLimits(_from.month, _from.year);
+  Future<void> loadPlans() async {
+    _plans = await _db.getPlans(
+        year: _from.year, month: _from.month, periodType: 'month');
+    notifyListeners();
+  }
+
+  Future<void> loadConstruction() async {
+    _cSections = await _db.getConstructionSections();
+    _cTotals   = await _db.getConstructionTotals();
     notifyListeners();
   }
 
@@ -71,7 +94,7 @@ class BudgetProvider extends ChangeNotifier {
     _from = DateTime(year, month, 1);
     _to   = DateTime(year, month + 1, 0, 23, 59, 59);
     loadTransactions();
-    loadLimits();
+    loadPlans();
   }
 
   void setTypeFilter(String? type) {
@@ -79,7 +102,37 @@ class BudgetProvider extends ChangeNotifier {
     loadTransactions();
   }
 
-  // ── Transactions ──
+  // ── Computed helpers ───────────────────────────────────
+
+  List<Category> categoriesForGroup(int groupId) =>
+      _categories.where((c) => c.groupId == groupId).toList();
+
+  double spentForCategory(int categoryId) => _transactions
+      .where((t) => t.type == 'expense' && t.categoryId == categoryId)
+      .fold(0, (s, t) => s + toKgs(t.amount, t.currency));
+
+  double spentForGroup(int groupId) {
+    final catIds = categoriesForGroup(groupId).map((c) => c.id).toSet();
+    return _transactions
+        .where((t) => t.type == 'expense' && catIds.contains(t.categoryId))
+        .fold(0, (s, t) => s + toKgs(t.amount, t.currency));
+  }
+
+  double planForCategory(int categoryId) {
+    final p = _plans.where((p) => p.categoryId == categoryId && p.groupId == null).firstOrNull;
+    return p?.amount ?? 0;
+  }
+
+  double planForGroup(int groupId) {
+    final catIds = categoriesForGroup(groupId).map((c) => c.id).toSet();
+    final catTotal = _plans
+        .where((p) => p.categoryId != null && catIds.contains(p.categoryId))
+        .fold(0.0, (s, p) => s + p.amount);
+    final grpPlan = _plans.where((p) => p.groupId == groupId && p.categoryId == null).firstOrNull;
+    return catTotal > 0 ? catTotal : (grpPlan?.amount ?? 0);
+  }
+
+  // ── Transactions ──────────────────────────────────────
   Future<void> addTransaction(m.Transaction t) async {
     await _db.insertTransaction(t);
     await loadTransactions();
@@ -95,7 +148,7 @@ class BudgetProvider extends ChangeNotifier {
     await loadTransactions();
   }
 
-  // ── Categories ──
+  // ── Categories ────────────────────────────────────────
   Future<void> addCategory(Category c) async {
     await _db.insertCategory(c);
     await loadCategories();
@@ -111,36 +164,76 @@ class BudgetProvider extends ChangeNotifier {
     await loadCategories();
   }
 
-  // ── Limits ──
-  Future<void> upsertLimit(BudgetLimit bl) async {
-    await _db.upsertBudgetLimit(bl);
-    await loadLimits();
+  // ── Groups ────────────────────────────────────────────
+  Future<void> addGroup(Group g) async {
+    await _db.insertGroup(g);
+    await loadGroups();
   }
 
-  Future<void> deleteLimit(int id) async {
-    await _db.deleteBudgetLimit(id);
-    await loadLimits();
+  Future<void> updateGroup(Group g) async {
+    await _db.updateGroup(g);
+    await loadGroups();
   }
 
-  // ── Analytics ──
+  Future<void> deleteGroup(int id) async {
+    await _db.deleteGroup(id);
+    await loadGroups();
+  }
+
+  // ── Plans ─────────────────────────────────────────────
+  Future<void> upsertPlan(Plan p) async {
+    await _db.upsertPlan(p);
+    await loadPlans();
+  }
+
+  Future<void> deletePlan(int id) async {
+    await _db.deletePlan(id);
+    await loadPlans();
+  }
+
+  // ── Construction ──────────────────────────────────────
+  Future<List<ConstructionItem>> getConstructionItems(int sectionId) =>
+      _db.getConstructionItems(sectionId);
+
+  Future<void> addConstructionItem(ConstructionItem item) async {
+    await _db.insertConstructionItem(item);
+    await loadConstruction();
+  }
+
+  Future<void> updateConstructionItem(ConstructionItem item) async {
+    await _db.updateConstructionItem(item);
+    await loadConstruction();
+  }
+
+  Future<void> deleteConstructionItem(int id) async {
+    await _db.deleteConstructionItem(id);
+    await loadConstruction();
+  }
+
+  Future<void> addConstructionSection(ConstructionSection s) async {
+    await _db.insertConstructionSection(s);
+    await loadConstruction();
+  }
+
+  Future<void> updateConstructionSection(ConstructionSection s) async {
+    await _db.updateConstructionSection(s);
+    await loadConstruction();
+  }
+
+  Future<void> deleteConstructionSection(int id) async {
+    await _db.deleteConstructionSection(id);
+    await loadConstruction();
+  }
+
+  // ── Analytics ─────────────────────────────────────────
   Future<Map<int, double>> getSumByCategory(String type) async {
-    // Re-compute from loaded transactions with currency conversion to KGS
     final result = <int, double>{};
     for (final t in _transactions) {
       if (t.type != type) continue;
-      result[t.categoryId] =
-          (result[t.categoryId] ?? 0) + toKgs(t.amount, t.currency);
+      result[t.categoryId] = (result[t.categoryId] ?? 0) + toKgs(t.amount, t.currency);
     }
     return result;
   }
 
-  Future<List<Map<String, dynamic>>> getMonthlyTotals() async {
-    return _db.getMonthlyTotals(6);
-  }
-
-  double spentForCategory(int categoryId) {
-    return _transactions
-        .where((t) => t.type == 'expense' && t.categoryId == categoryId)
-        .fold(0, (s, t) => s + toKgs(t.amount, t.currency));
-  }
+  Future<List<Map<String, dynamic>>> getMonthlyTotals() => _db.getMonthlyTotals(6);
 }

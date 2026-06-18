@@ -7,6 +7,7 @@ class Category {
   final int colorValue;
   final int iconCode;
   final int? parentId;
+  final int? groupId;
 
   const Category({
     this.id,
@@ -15,13 +16,14 @@ class Category {
     required this.colorValue,
     required this.iconCode,
     this.parentId,
+    this.groupId,
   });
 
   Color get color => Color(colorValue);
   // ignore: non_const_argument_for_const_parameter
   IconData get icon => IconData(iconCode, fontFamily: 'MaterialIcons');
 
-  Category copyWith({String? name, String? type, int? colorValue, int? iconCode, int? parentId}) {
+  Category copyWith({String? name, String? type, int? colorValue, int? iconCode, int? parentId, int? groupId}) {
     return Category(
       id: id,
       name: name ?? this.name,
@@ -29,6 +31,7 @@ class Category {
       colorValue: colorValue ?? this.colorValue,
       iconCode: iconCode ?? this.iconCode,
       parentId: parentId ?? this.parentId,
+      groupId: groupId ?? this.groupId,
     );
   }
 
@@ -39,6 +42,7 @@ class Category {
     'color': colorValue,
     'icon': iconCode,
     'parent_id': parentId,
+    'group_id': groupId,
   };
 
   factory Category.fromMap(Map<String, dynamic> m) => Category(
@@ -48,5 +52,6 @@ class Category {
     colorValue: (m['color'] as num).toInt(),
     iconCode:   (m['icon']  as num).toInt(),
     parentId:   (m['parent_id'] as num?)?.toInt(),
+    groupId:    (m['group_id'] as num?)?.toInt(),
   );
 }

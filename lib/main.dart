@@ -8,7 +8,9 @@ import 'screens/home_screen.dart';
 import 'screens/transactions_screen.dart';
 import 'screens/reports_screen.dart';
 import 'screens/categories_screen.dart';
-import 'screens/budget_limits_screen.dart';
+import 'screens/planning_screen.dart';
+import 'screens/analysis_screen.dart';
+import 'screens/construction_screen.dart';
 import 'screens/rates_screen.dart';
 import 'services/currency_service.dart';
 import 'theme/app_theme.dart';
@@ -83,10 +85,9 @@ class _MainShellState extends State<MainShell> {
   final _screens = const [
     HomeScreen(),
     TransactionsScreen(),
-    ReportsScreen(),
-    CategoriesScreen(),
-    BudgetLimitsScreen(),
-    RatesScreen(),
+    PlanningScreen(),
+    AnalysisScreen(),
+    ConstructionScreen(),
   ];
 
   @override
@@ -108,24 +109,19 @@ class _MainShellState extends State<MainShell> {
             label: 'Операции',
           ),
           NavigationDestination(
-            icon: Icon(Icons.bar_chart_outlined),
-            selectedIcon: Icon(Icons.bar_chart),
-            label: 'Отчёты',
+            icon: Icon(Icons.event_note_outlined),
+            selectedIcon: Icon(Icons.event_note),
+            label: 'Планы',
           ),
           NavigationDestination(
-            icon: Icon(Icons.category_outlined),
-            selectedIcon: Icon(Icons.category),
-            label: 'Категории',
+            icon: Icon(Icons.analytics_outlined),
+            selectedIcon: Icon(Icons.analytics),
+            label: 'Анализ',
           ),
           NavigationDestination(
-            icon: Icon(Icons.savings_outlined),
-            selectedIcon: Icon(Icons.savings),
-            label: 'Лимиты',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.currency_exchange_outlined),
-            selectedIcon: Icon(Icons.currency_exchange),
-            label: 'Курсы',
+            icon: Icon(Icons.home_work_outlined),
+            selectedIcon: Icon(Icons.home_work),
+            label: 'Стройка',
           ),
         ],
       ),
@@ -144,6 +140,23 @@ class _MainShellState extends State<MainShell> {
               ],
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.category_outlined),
+            title: const Text('Категории'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const CategoriesScreen()));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.currency_exchange_outlined),
+            title: const Text('Курсы валют'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const RatesScreen()));
+            },
+          ),
+          const Divider(),
           ListTile(
             leading: Icon(widget.isDark ? Icons.light_mode : Icons.dark_mode),
             title: Text(widget.isDark ? 'Светлая тема' : 'Тёмная тема'),

@@ -33,17 +33,13 @@ class TransactionTile extends StatelessWidget {
     final kgsAmount = provider.toKgs(tx.amount, tx.currency);
     final showKgs = tx.currency != 'KGS';
 
-    // Проверка превышения лимита (только для расходов)
+    // Проверка превышения плана (только для расходов)
     double? overAmount;
     if (!isIncome) {
-      final limit = provider.limits
-          .where((l) => l.categoryId == tx.categoryId)
-          .firstOrNull;
-      if (limit != null) {
+      final plan = provider.planForCategory(tx.categoryId);
+      if (plan > 0) {
         final spent = provider.spentForCategory(tx.categoryId);
-        if (spent > limit.limitAmount) {
-          overAmount = spent - limit.limitAmount;
-        }
+        if (spent > plan) overAmount = spent - plan;
       }
     }
 
@@ -135,7 +131,7 @@ class TransactionTile extends StatelessWidget {
                 const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 15),
                 const SizedBox(width: 6),
                 const Text(
-                  'Лимит превышен на ',
+                  'План превышен на ',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 Text(

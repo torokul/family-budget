@@ -9,7 +9,8 @@ import '../services/currency_service.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final Transaction? existing;
-  const AddTransactionScreen({super.key, this.existing});
+  final int? preselectedCategoryId;
+  const AddTransactionScreen({super.key, this.existing, this.preselectedCategoryId});
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
@@ -36,6 +37,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _receiptBase64  = t.receiptBase64;
       _amountCtrl.text  = t.amount.toString();
       _commentCtrl.text = t.comment ?? '';
+    } else if (widget.preselectedCategoryId != null) {
+      _categoryId = widget.preselectedCategoryId;
     }
   }
 
