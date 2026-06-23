@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -61,6 +62,12 @@ class _FamilyBudgetAppState extends State<FamilyBudgetApp> {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: _themeMode,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [Locale('ru'), Locale('en')],
         home: MainShell(
           onToggleTheme: _toggleTheme,
           isDark: _themeMode == ThemeMode.dark,

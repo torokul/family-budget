@@ -10,7 +10,8 @@ import '../services/currency_service.dart';
 class AddTransactionScreen extends StatefulWidget {
   final Transaction? existing;
   final int? preselectedCategoryId;
-  const AddTransactionScreen({super.key, this.existing, this.preselectedCategoryId});
+  final String? preselectedType; // 'income' | 'expense'
+  const AddTransactionScreen({super.key, this.existing, this.preselectedCategoryId, this.preselectedType});
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
@@ -39,6 +40,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _commentCtrl.text = t.comment ?? '';
     } else if (widget.preselectedCategoryId != null) {
       _categoryId = widget.preselectedCategoryId;
+      if (widget.preselectedType != null) _type = widget.preselectedType!;
     }
   }
 
@@ -124,6 +126,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Widget build(BuildContext context) {
     final provider  = context.watch<BudgetProvider>();
     final cats      = provider.categories.where((c) => c.type == _type).toList();
+    // Если выбранная категория не входит в текущий тип — сбросить
+    if (_categoryId != null && cats.every((c) => c.id != _categoryId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => setState(() => _categoryId = null));
+    }
     final dateFmt   = DateFormat('dd MMMM yyyy', 'ru_RU');
     final isExpense = _type == 'expense';
 

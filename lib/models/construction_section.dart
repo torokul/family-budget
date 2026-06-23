@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class ConstructionSection {
   final int? id;
+  final int objectId;
   final String name;
   final double planAmount;
   final int iconCode;
@@ -10,6 +11,7 @@ class ConstructionSection {
 
   const ConstructionSection({
     this.id,
+    required this.objectId,
     required this.name,
     this.planAmount = 0,
     required this.iconCode,
@@ -22,6 +24,7 @@ class ConstructionSection {
 
   Map<String, dynamic> toMap() => {
     if (id != null) 'id': id,
+    'object_id': objectId,
     'name': name,
     'plan_amount': planAmount,
     'icon': iconCode,
@@ -31,6 +34,7 @@ class ConstructionSection {
 
   factory ConstructionSection.fromMap(Map<String, dynamic> m) => ConstructionSection(
     id:          (m['id'] as num?)?.toInt(),
+    objectId:    (m['object_id'] as num?)?.toInt() ?? 1,
     name:        m['name'] as String,
     planAmount:  (m['plan_amount'] as num?)?.toDouble() ?? 0,
     iconCode:    (m['icon'] as num).toInt(),
@@ -41,6 +45,7 @@ class ConstructionSection {
   ConstructionSection copyWith({String? name, double? planAmount, int? iconCode, int? colorValue}) =>
       ConstructionSection(
         id: id,
+        objectId: objectId,
         name: name ?? this.name,
         planAmount: planAmount ?? this.planAmount,
         iconCode: iconCode ?? this.iconCode,

@@ -1,26 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../models/construction_section.dart';
+import '../models/construction_object.dart';
 import '../models/construction_item.dart';
+import '../models/construction_expense.dart';
 import '../providers/budget_provider.dart';
+import '../services/currency_service.dart';
+import 'construction_object_screen.dart';
 
 class ConstructionScreen extends StatelessWidget {
   const ConstructionScreen({super.key});
 
+  static const _units = ['шт', 'м', 'м²', 'м³', 'кг', 'т', 'л', 'уп', 'рул', 'мешок'];
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<BudgetProvider>();
+    final objects  = provider.cObjects;
     final fmt      = NumberFormat('#,##0', 'ru_RU');
-    final sections = provider.cSections;
-    final totals   = provider.cTotals;
 
-    final totalPlan  = sections.fold(0.0, (s, sec) => s + sec.planAmount);
-    final totalSpent = sections.fold(0.0, (s, sec) => s + (totals[sec.id] ?? 0));
+    final totalPlan = objects.fold(0.0, (s, o) => s + provider.objectPlan(o.id!));
+    final totalFact = objects.fold(0.0, (s, o) => s + provider.objectFact(o.id!));
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Строительство дома'),
+        title: const Text('Строительство'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -28,307 +32,484 @@ class ConstructionScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          // Summary
-          Card(
-            color: const Color(0xFF4A148C),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(children: [
-                const Row(children: [
-                  Icon(Icons.home_work_outlined, color: Colors.white70, size: 20),
-                  SizedBox(width: 8),
-                  Text('Общий бюджет строительства',
-                      style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-                ]),
+      body: objects.isEmpty
+          ? Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.home_work_outlined, size: 64, color: Colors.grey),
                 const SizedBox(height: 12),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                  _summaryCol('Бюджет', totalPlan, Colors.white70, fmt),
-                  _summaryCol('Потрачено', totalSpent,
-                      totalSpent > totalPlan ? const Color(0xFFEF9A9A) : const Color(0xFF81C784), fmt),
-                  _summaryCol('Остаток', totalPlan - totalSpent,
-                      (totalPlan - totalSpent) >= 0 ? const Color(0xFF81C784) : const Color(0xFFEF9A9A), fmt),
-                ]),
-                if (totalPlan > 0) ...[
-                  const SizedBox(height: 12),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: LinearProgressIndicator(
-                      value: (totalSpent / totalPlan).clamp(0.0, 1.0),
-                      minHeight: 8,
-                      backgroundColor: Colors.white24,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        totalSpent > totalPlan ? const Color(0xFFEF9A9A) : const Color(0xFF81C784),
-                      ),
+                const Text('Нет объектов строительства',
+                    style: TextStyle(color: Colors.grey, fontSize: 16)),
+                const SizedBox(height: 8),
+                Text('Добавьте объект во вкладке Планы',
+                    style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+              ]),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                // Summary (если > 1 объекта)
+                if (objects.length > 1)
+                  Card(
+                    color: const Color(0xFF4A148C),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(children: [
+                        const Row(children: [
+                          Icon(Icons.construction, color: Colors.white70, size: 18),
+                          SizedBox(width: 8),
+                          Text('Все объекты',
+                              style: TextStyle(color: Colors.white, fontSize: 14,
+                                  fontWeight: FontWeight.bold)),
+                        ]),
+                        const SizedBox(height: 10),
+                        Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                          _col('Бюджет',    totalPlan, Colors.white70, fmt),
+                          _col('Потрачено', totalFact,
+                              totalFact > totalPlan
+                                  ? const Color(0xFFEF9A9A) : const Color(0xFF81C784), fmt),
+                          _col('Остаток',   totalPlan - totalFact,
+                              (totalPlan - totalFact) >= 0
+                                  ? const Color(0xFF81C784) : const Color(0xFFEF9A9A), fmt),
+                        ]),
+                      ]),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text('${(totalSpent / totalPlan * 100).toStringAsFixed(1)}% освоено',
-                      style: const TextStyle(color: Colors.white60, fontSize: 11)),
+
+                ...objects.map((obj) {
+                  final plan   = provider.objectPlan(obj.id!);
+                  final fact   = provider.objectFact(obj.id!);
+                  final sects  = provider.sectionsForObject(obj.id!);
+                  final pct    = plan > 0 ? (fact / plan * 100).round() : null;
+                  final over   = plan > 0 && fact > plan;
+                  final barCol = over ? const Color(0xFFD32F2F)
+                      : (pct != null && pct > 80) ? const Color(0xFFF57F17)
+                      : const Color(0xFF2E7D32);
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => Navigator.push(context,
+                          MaterialPageRoute(
+                              builder: (_) => ConstructionObjectScreen(object: obj))),
+                      child: Column(children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 14),
+                          color: const Color(0xFF4A148C),
+                          child: Row(children: [
+                            const Icon(Icons.home_work, color: Colors.white, size: 24),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(obj.name,
+                                    style: const TextStyle(color: Colors.white,
+                                        fontSize: 16, fontWeight: FontWeight.bold)),
+                                if (obj.description != null &&
+                                    obj.description!.isNotEmpty)
+                                  Text(obj.description!,
+                                      style: const TextStyle(
+                                          color: Colors.white60, fontSize: 12)),
+                              ]),
+                            ),
+                            if (pct != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withAlpha(40),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text('$pct%',
+                                    style: const TextStyle(color: Colors.white,
+                                        fontSize: 12, fontWeight: FontWeight.bold)),
+                              ),
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined,
+                                  color: Colors.white70, size: 18),
+                              tooltip: 'Изменить',
+                              onPressed: () => _showObjectForm(context, obj),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ]),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(children: [
+                              Expanded(child: _factPlanCol('Бюджет', plan,
+                                  Colors.black87, fmt)),
+                              Expanded(child: _factPlanCol('Потрачено', fact,
+                                  over ? const Color(0xFFD32F2F) : Colors.black87, fmt)),
+                              Expanded(child: _factPlanCol('Остаток', plan - fact,
+                                  over ? const Color(0xFFD32F2F)
+                                      : const Color(0xFF2E7D32), fmt)),
+                            ]),
+                            if (plan > 0) ...[
+                              const SizedBox(height: 10),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: LinearProgressIndicator(
+                                  value: (fact / plan).clamp(0.0, 1.0),
+                                  minHeight: 8,
+                                  backgroundColor: Colors.grey.shade200,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(barCol),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            Text('${sects.length} групп затрат',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey.shade500)),
+                          ]),
+                        ),
+                      ]),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 80),
+              ],
+            ),
+      floatingActionButton: objects.isEmpty
+          ? null
+          : FloatingActionButton.extended(
+              heroTag: 'fab_construction',
+              backgroundColor: const Color(0xFF4A148C),
+              icon: const Icon(Icons.add_chart),
+              label: const Text('Добавить расход'),
+              onPressed: () => _showGlobalExpenseForm(context),
+            ),
+    );
+  }
+
+  // ── Глобальная форма добавления расхода ──────────────────────────────────────
+  void _showGlobalExpenseForm(BuildContext context) {
+    final provider = context.read<BudgetProvider>();
+    final objects  = provider.cObjects;
+    if (objects.isEmpty) return;
+
+    final qtyCtrl    = TextEditingController(text: '1');
+    final priceCtrl  = TextEditingController();
+    final amountCtrl = TextEditingController();
+    final descCtrl   = TextEditingController();
+
+    ConstructionObject?  selObj     = objects.first;
+    var selSections = provider.sectionsForObject(selObj.id!);
+    var selSection  = selSections.isNotEmpty ? selSections.first : null;
+    var selItems    = selSection != null
+        ? provider.itemsForSection(selSection.id!) : <ConstructionItem>[];
+    ConstructionItem? selItem = selItems.isNotEmpty ? selItems.first : null;
+
+    String selUnit     = selItem?.unit ?? 'шт';
+    String selCurrency = 'KGS';
+    DateTime selDate   = DateTime.now();
+
+    void recalc(StateSetter setModal) {
+      final qty   = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 0;
+      final price = double.tryParse(priceCtrl.text.replaceAll(',', '.')) ?? 0;
+      if (qty > 0 && price > 0) {
+        amountCtrl.text = (qty * price).toStringAsFixed(0);
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          qtyCtrl.addListener(() => recalc(setModal));
+          priceCtrl.addListener(() => recalc(setModal));
+
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 16, right: 16, top: 20),
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // Handle
+                Center(child: Container(width: 40, height: 4,
+                    decoration: BoxDecoration(color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2)))),
+                const SizedBox(height: 14),
+                const Text('Добавить расход',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 14),
+
+                // ── Объект ──
+                DropdownButtonFormField<ConstructionObject>(
+                  value: selObj,
+                  decoration: const InputDecoration(
+                      labelText: 'Объект', border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.home_work_outlined)),
+                  items: objects.map((o) => DropdownMenuItem(
+                    value: o, child: Text(o.name))).toList(),
+                  onChanged: (o) => setModal(() {
+                    selObj      = o;
+                    selSections = o != null
+                        ? provider.sectionsForObject(o.id!) : [];
+                    selSection  = selSections.isNotEmpty ? selSections.first : null;
+                    selItems    = selSection != null
+                        ? provider.itemsForSection(selSection!.id!) : [];
+                    selItem     = selItems.isNotEmpty ? selItems.first : null;
+                    selUnit     = selItem?.unit ?? 'шт';
+                  }),
+                ),
+                const SizedBox(height: 10),
+
+                // ── Группа затрат ──
+                if (selSections.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'У объекта нет групп. Добавьте их в разделе Планы.',
+                      style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                    ),
+                  )
+                else
+                  DropdownButtonFormField(
+                    value: selSection,
+                    decoration: const InputDecoration(
+                        labelText: 'Группа затрат', border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.category_outlined)),
+                    items: selSections.map((s) => DropdownMenuItem(
+                      value: s,
+                      child: Row(children: [
+                        Icon(s.icon, color: s.color, size: 16),
+                        const SizedBox(width: 8),
+                        Text(s.name),
+                      ]),
+                    )).toList(),
+                    onChanged: (s) => setModal(() {
+                      selSection = s;
+                      selItems   = s != null
+                          ? provider.itemsForSection(s.id!) : [];
+                      selItem    = selItems.isNotEmpty ? selItems.first : null;
+                      selUnit    = selItem?.unit ?? 'шт';
+                    }),
+                  ),
+                const SizedBox(height: 10),
+
+                // ── Статья затрат ──
+                if (selSection != null) ...[
+                  if (selItems.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Нет статей в группе «${selSection!.name}». '
+                        'Добавьте их в разделе Планы.',
+                        style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<ConstructionItem>(
+                      value: selItem,
+                      decoration: const InputDecoration(
+                          labelText: 'Статья затрат', border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.label_outline)),
+                      items: selItems.map((it) => DropdownMenuItem(
+                        value: it, child: Text(it.name))).toList(),
+                      onChanged: (it) => setModal(() {
+                        selItem = it;
+                        selUnit = it?.unit ?? 'шт';
+                      }),
+                    ),
                 ],
+                const SizedBox(height: 10),
+
+                // ── Дата ──
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: selDate,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2030),
+                    );
+                    if (d != null) setModal(() => selDate = d);
+                  },
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label: Text(DateFormat('dd.MM.yyyy').format(selDate)),
+                ),
+                const SizedBox(height: 10),
+
+                // ── Кол-во × ед × цена ──
+                Row(children: [
+                  Expanded(flex: 3, child: TextField(
+                    controller: qtyCtrl, keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                        labelText: 'Кол-во', border: OutlineInputBorder()),
+                  )),
+                  const SizedBox(width: 6),
+                  Expanded(flex: 3, child: DropdownButtonFormField<String>(
+                    value: selUnit,
+                    decoration: const InputDecoration(labelText: 'Ед.',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 14)),
+                    items: _units.map((u) => DropdownMenuItem(
+                        value: u, child: Text(u))).toList(),
+                    onChanged: (v) { if (v != null) setModal(() => selUnit = v); },
+                  )),
+                  const SizedBox(width: 6),
+                  Expanded(flex: 4, child: TextField(
+                    controller: priceCtrl, keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                        labelText: 'Цена', border: OutlineInputBorder()),
+                  )),
+                ]),
+                const SizedBox(height: 8),
+
+                // ── Сумма ──
+                TextField(
+                  controller: amountCtrl, keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Сумма (итого)',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: Tooltip(
+                      message: 'Авторасчёт: кол-во × цена',
+                      child: Icon(Icons.calculate_outlined,
+                          color: Colors.grey.shade400, size: 18),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // ── Валюта ──
+                DropdownButtonFormField<String>(
+                  value: selCurrency,
+                  decoration: const InputDecoration(
+                      labelText: 'Валюта', border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.currency_exchange_outlined)),
+                  items: CurrencyService.supported.map((c) => DropdownMenuItem(
+                    value: c,
+                    child: Text('${CurrencyService.flags[c] ?? ''} $c'),
+                  )).toList(),
+                  onChanged: (v) {
+                    if (v != null) setModal(() => selCurrency = v);
+                  },
+                ),
+                const SizedBox(height: 8),
+
+                // ── Примечание ──
+                TextField(controller: descCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Примечание', border: OutlineInputBorder())),
+                const SizedBox(height: 16),
+
+                // ── Сохранить ──
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF4A148C)),
+                    onPressed: () async {
+                      if (selItem == null) return;
+                      final qty    = double.tryParse(
+                          qtyCtrl.text.replaceAll(',', '.')) ?? 1;
+                      final price  = double.tryParse(
+                          priceCtrl.text.replaceAll(',', '.')) ?? 0;
+                      final amount = double.tryParse(
+                          amountCtrl.text.replaceAll(',', '.'))
+                          ?? (qty * price);
+                      if (amount <= 0) return;
+                      await context.read<BudgetProvider>().addConstructionExpense(
+                        ConstructionExpense(
+                          itemId:      selItem!.id!,
+                          qty:         qty,
+                          unit:        selUnit,
+                          price:       price,
+                          amount:      amount,
+                          currency:    selCurrency,
+                          description: descCtrl.text.trim().isEmpty
+                              ? null : descCtrl.text.trim(),
+                          date: selDate,
+                        ),
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                    child: const Text('Сохранить'),
+                  ),
+                ),
+                const SizedBox(height: 16),
               ]),
             ),
-          ),
-          const SizedBox(height: 12),
-          // Sections
-          ...sections.map((sec) {
-            final spent = totals[sec.id] ?? 0.0;
-            return _SectionCard(section: sec, spent: spent, fmt: fmt);
-          }),
-          const SizedBox(height: 80),
-        ],
+          );
+        },
       ),
     );
   }
 
-  Widget _summaryCol(String label, double val, Color color, NumberFormat fmt) {
-    return Column(children: [
-      Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
-      const SizedBox(height: 4),
-      Text(fmt.format(val),
-          style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.bold)),
-    ]);
-  }
-}
+  Widget _col(String label, double val, Color color, NumberFormat fmt) =>
+      Column(children: [
+        Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
+        const SizedBox(height: 3),
+        Text(fmt.format(val),
+            style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.bold)),
+      ]);
 
-// ── Section Card ─────────────────────────────────────────────────────────────
-class _SectionCard extends StatefulWidget {
-  final ConstructionSection section;
-  final double spent;
-  final NumberFormat fmt;
-  const _SectionCard({required this.section, required this.spent, required this.fmt});
+  Widget _factPlanCol(String label, double val, Color color, NumberFormat fmt) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+        Text(fmt.format(val),
+            style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.w600)),
+      ]);
 
-  @override
-  State<_SectionCard> createState() => _SectionCardState();
-}
-
-class _SectionCardState extends State<_SectionCard> {
-  bool _expanded = false;
-  List<ConstructionItem> _items = [];
-  bool _loading = false;
-
-  Future<void> _loadItems() async {
-    setState(() => _loading = true);
-    _items = await context.read<BudgetProvider>().getConstructionItems(widget.section.id!);
-    setState(() => _loading = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final sec     = widget.section;
-    final spent   = widget.spent;
-    final plan    = sec.planAmount;
-    final hasPlan = plan > 0;
-    final over    = hasPlan && spent > plan;
-    final pct     = hasPlan ? (spent / plan * 100).round() : null;
-    final barColor = over ? const Color(0xFFD32F2F)
-        : (pct != null && pct > 80) ? const Color(0xFFF57F17) : const Color(0xFF2E7D32);
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      clipBehavior: Clip.antiAlias,
-      child: Column(children: [
-        // Header
-        InkWell(
-          onTap: () {
-            setState(() => _expanded = !_expanded);
-            if (_expanded) _loadItems();
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            color: sec.color,
-            child: Row(children: [
-              Icon(sec.icon, color: Colors.white, size: 22),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(sec.name,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                  Row(children: [
-                    Text('${widget.fmt.format(spent)} KGS',
-                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    if (hasPlan) ...[
-                      const Text(' / ', style: TextStyle(color: Colors.white38)),
-                      Text('${widget.fmt.format(plan)} KGS',
-                          style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                    ],
-                  ]),
-                ]),
-              ),
-              if (pct != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(40),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text('$pct%', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-              const SizedBox(width: 4),
-              Icon(_expanded ? Icons.expand_less : Icons.expand_more, color: Colors.white70, size: 18),
-            ]),
-          ),
-        ),
-        // Progress bar
-        if (hasPlan)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: (spent / plan).clamp(0.0, 1.0), minHeight: 6,
-                backgroundColor: Colors.grey.shade200,
-                valueColor: AlwaysStoppedAnimation<Color>(barColor),
-              ),
-            ),
-          ),
-        // Items list
-        if (_expanded) ...[
-          const Divider(height: 1),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_items.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Center(
-                child: Text('Нет записей', style: TextStyle(color: Colors.grey.shade500)),
-              ),
-            )
-          else
-            ..._items.map((item) => ListTile(
-              dense: true,
-              title: Text(item.name, style: const TextStyle(fontSize: 13)),
-              subtitle: item.date != null
-                  ? Text(DateFormat('dd.MM.yyyy').format(item.date!),
-                      style: const TextStyle(fontSize: 11))
-                  : null,
-              trailing: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(widget.fmt.format(item.amount),
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  if (item.qty != 1 || item.price != 0)
-                    Text('${item.qty} × ${widget.fmt.format(item.price)}',
-                        style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                ],
-              ),
-            )),
-          // Add item button
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: OutlinedButton.icon(
-              onPressed: () => _showAddItem(context),
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Добавить позицию', style: TextStyle(fontSize: 13)),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: sec.color,
-                side: BorderSide(color: sec.color),
-              ),
-            ),
-          ),
-        ],
-      ]),
-    );
-  }
-
-  void _showAddItem(BuildContext context) {
-    final nameCtrl   = TextEditingController();
-    final amountCtrl = TextEditingController();
-    final qtyCtrl    = TextEditingController(text: '1');
-    final priceCtrl  = TextEditingController();
-    final descCtrl   = TextEditingController();
-    DateTime? selectedDate;
+  void _showObjectForm(BuildContext context, ConstructionObject existing) {
+    final nameCtrl = TextEditingController(text: existing.name);
+    final descCtrl = TextEditingController(text: existing.description ?? '');
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModal) => Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom,
-              left: 16, right: 16, top: 20),
-          child: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Добавить позицию · ${widget.section.name}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              TextField(controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Название', border: OutlineInputBorder())),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(
-                  child: TextField(controller: qtyCtrl, keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Кол-во', border: OutlineInputBorder())),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(controller: priceCtrl, keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Цена', border: OutlineInputBorder())),
-                ),
-              ]),
-              const SizedBox(height: 8),
-              TextField(controller: amountCtrl, keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Сумма (итого)', border: OutlineInputBorder())),
-              const SizedBox(height: 8),
-              TextField(controller: descCtrl,
-                  decoration: const InputDecoration(labelText: 'Примечание', border: OutlineInputBorder())),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final d = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime(2030),
-                  );
-                  if (d != null) setModal(() => selectedDate = d);
-                },
-                icon: const Icon(Icons.calendar_today, size: 16),
-                label: Text(selectedDate != null
-                    ? DateFormat('dd.MM.yyyy').format(selectedDate!)
-                    : 'Выбрать дату'),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () async {
-                    final name = nameCtrl.text.trim();
-                    if (name.isEmpty) return;
-                    final qty    = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 1;
-                    final price  = double.tryParse(priceCtrl.text.replaceAll(',', '.')) ?? 0;
-                    final amount = double.tryParse(amountCtrl.text.replaceAll(',', '.'))
-                        ?? (qty * price);
-                    if (amount <= 0) return;
-                    await context.read<BudgetProvider>().addConstructionItem(ConstructionItem(
-                      sectionId: widget.section.id!,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            left: 16, right: 16, top: 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Изменить объект',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          TextField(controller: nameCtrl, autofocus: true,
+              decoration: const InputDecoration(labelText: 'Название',
+                  border: OutlineInputBorder())),
+          const SizedBox(height: 10),
+          TextField(controller: descCtrl,
+              decoration: const InputDecoration(labelText: 'Описание',
+                  border: OutlineInputBorder())),
+          const SizedBox(height: 16),
+          SizedBox(width: double.infinity,
+            child: FilledButton(
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) return;
+                await context.read<BudgetProvider>().updateConstructionObject(
+                    existing.copyWith(
                       name: name,
-                      qty: qty,
-                      price: price,
-                      amount: amount,
-                      description: descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
-                      date: selectedDate,
+                      description: descCtrl.text.trim().isEmpty
+                          ? null : descCtrl.text.trim(),
                     ));
-                    await _loadItems();
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                  child: const Text('Сохранить'),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ]),
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Сохранить'),
+            ),
           ),
-        ),
+          const SizedBox(height: 16),
+        ]),
       ),
     );
   }
+
 }

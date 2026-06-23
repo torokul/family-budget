@@ -5,6 +5,7 @@ import '../providers/budget_provider.dart';
 import '../widgets/group_card.dart';
 import 'add_transaction_screen.dart';
 import 'group_detail_screen.dart';
+import 'construction_object_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,10 +22,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final isCurrentMonth = provider.from.year == DateTime.now().year &&
                            provider.from.month == DateTime.now().month;
 
-    final expGroups = provider.groups.where((g) => g.type != 'income').toList()
-      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-    final incGroups = provider.groups.where((g) => g.type == 'income').toList()
-      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    final expGroups = provider.groups
+        .where((g) => g.type != 'income' && provider.categoriesForGroup(g.id!).isNotEmpty)
+        .toList()..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    final incGroups = provider.groups
+        .where((g) => g.type == 'income' && provider.categoriesForGroup(g.id!).isNotEmpty)
+        .toList()..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
@@ -131,6 +134,93 @@ class _HomeScreenState extends State<HomeScreen> {
                         MaterialPageRoute(builder: (_) => GroupDetailScreen(group: g))),
                     ),
                   )),
+                ],
+                // ── Объекты строительства (fix 6) ──────────────
+                if (provider.cObjects.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  _sectionLabel('Строительство'),
+                  const SizedBox(height: 8),
+                  ...provider.cObjects.map((obj) {
+                    final plan = provider.objectPlan(obj.id!);
+                    final fact = provider.objectFact(obj.id!);
+                    final hasPlan = plan > 0;
+                    final over  = hasPlan && fact > plan;
+                    final pct   = hasPlan ? (fact / plan).clamp(0.0, 1.0) : 0.0;
+                    final pctLbl = hasPlan ? '${(fact / plan * 100).round()}%' : null;
+                    final barCol = over ? const Color(0xFFD32F2F)
+                        : (hasPlan && fact / plan > 0.8) ? const Color(0xFFF57F17)
+                        : const Color(0xFF2E7D32);
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Card(
+                        elevation: 3,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => Navigator.push(context, MaterialPageRoute(
+                            builder: (_) => ConstructionObjectScreen(object: obj))),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              color: const Color(0xFF4A148C),
+                              child: Row(children: [
+                                const Icon(Icons.home_work, color: Colors.white, size: 22),
+                                const SizedBox(width: 10),
+                                Expanded(child: Text(obj.name,
+                                    style: const TextStyle(color: Colors.white,
+                                        fontWeight: FontWeight.bold, fontSize: 15))),
+                                if (pctLbl != null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withAlpha(40),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(pctLbl, style: const TextStyle(
+                                        color: Colors.white, fontSize: 12,
+                                        fontWeight: FontWeight.bold)),
+                                  ),
+                              ]),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Row(children: [
+                                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Факт', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                      Text(fmt.format(fact) + ' KGS',
+                                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold,
+                                              color: over ? const Color(0xFFD32F2F) : Colors.black87)),
+                                    ])),
+                                  if (hasPlan) Column(crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text('Бюджет', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                      Text(fmt.format(plan) + ' KGS',
+                                          style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
+                                    ]),
+                                ]),
+                                if (hasPlan) ...[
+                                  const SizedBox(height: 8),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: pct, minHeight: 6,
+                                      backgroundColor: Colors.grey.shade200,
+                                      valueColor: AlwaysStoppedAnimation<Color>(barCol),
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 6),
+                                Text('${provider.sectionsForObject(obj.id!).length} групп затрат',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                              ]),
+                            ),
+                          ]),
+                        ),
+                      ),
+                    );
+                  }),
                 ],
                 const SizedBox(height: 80),
               ]),

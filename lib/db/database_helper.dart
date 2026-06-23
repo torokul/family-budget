@@ -4,8 +4,10 @@ import '../models/category.dart';
 import '../models/transaction.dart' as m;
 import '../models/plan.dart';
 import '../models/group.dart';
+import '../models/construction_object.dart';
 import '../models/construction_section.dart';
 import '../models/construction_item.dart';
+import '../models/construction_expense.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
@@ -16,8 +18,10 @@ class DatabaseHelper {
   static const _planBox      = 'plans';
   static const _metaBox      = 'meta';
   static const _groupBox     = 'groups';
+  static const _cObjectBox   = 'construction_objects';
   static const _cSectionBox  = 'construction_sections';
   static const _cItemBox     = 'construction_items';
+  static const _cExpBox      = 'construction_expenses';
 
   Future<void> init() async {
     await Hive.initFlutter();
@@ -25,22 +29,30 @@ class DatabaseHelper {
     await Hive.openBox<Map>(_txBox);
     await Hive.openBox<Map>(_planBox);
     await Hive.openBox<Map>(_groupBox);
+    await Hive.openBox<Map>(_cObjectBox);
     await Hive.openBox<Map>(_cSectionBox);
     await Hive.openBox<Map>(_cItemBox);
+    await Hive.openBox<Map>(_cExpBox);
     await Hive.openBox(_metaBox);
     await _seedGroups();
     await _seedCategories();
+    await _seedConstructionObjects();
     await _seedConstructionSections();
     await _migrateIcons();
     await _migrateGroupIds();
+    await _migrateConstructionObjectIds();
+    await _migrateItemsToExpenses();
+    await _removeConstructionGroup();
   }
 
   Box<Map> get _cats     => Hive.box<Map>(_catBox);
   Box<Map> get _txs      => Hive.box<Map>(_txBox);
   Box<Map> get _plans    => Hive.box<Map>(_planBox);
   Box<Map> get _groups   => Hive.box<Map>(_groupBox);
+  Box<Map> get _cObjects => Hive.box<Map>(_cObjectBox);
   Box<Map> get _cSects   => Hive.box<Map>(_cSectionBox);
   Box<Map> get _cItems   => Hive.box<Map>(_cItemBox);
+  Box<Map> get _cExps    => Hive.box<Map>(_cExpBox);
   Box      get _meta     => Hive.box(_metaBox);
 
   int _nextId(String key) {
@@ -56,8 +68,7 @@ class DatabaseHelper {
       {'name': 'Семейные расходы',   'icon': Icons.home.codePoint,             'color': 0xFF1565C0, 'sort_order': 1, 'type': 'expense'},
       {'name': 'Расходы на детей',   'icon': Icons.child_care.codePoint,       'color': 0xFFE91E63, 'sort_order': 2, 'type': 'expense'},
       {'name': 'Содержание авто',    'icon': Icons.directions_car.codePoint,   'color': 0xFFFF6F00, 'sort_order': 3, 'type': 'expense'},
-      {'name': 'Строительство дома', 'icon': Icons.construction.codePoint,     'color': 0xFF4E342E, 'sort_order': 4, 'type': 'expense'},
-      {'name': 'Доходы',             'icon': Icons.trending_up.codePoint,      'color': 0xFF2E7D32, 'sort_order': 5, 'type': 'income'},
+      {'name': 'Доходы',             'icon': Icons.trending_up.codePoint,      'color': 0xFF2E7D32, 'sort_order': 4, 'type': 'income'},
     ];
     for (final d in defaults) {
       final id = _nextId('grp_id');
@@ -75,12 +86,10 @@ class DatabaseHelper {
     final int dohody  = grpMap['Доходы']             ?? 5;
 
     final defaults = [
-      // Доходы
       {'name': 'Зарплата',       'type': 'income',  'color': 0xFF4CAF50, 'icon': Icons.work.codePoint,                  'group_id': dohody},
       {'name': 'Фриланс',        'type': 'income',  'color': 0xFF00BCD4, 'icon': Icons.laptop_mac.codePoint,            'group_id': dohody},
       {'name': 'Инвестиции',     'type': 'income',  'color': 0xFF8BC34A, 'icon': Icons.trending_up.codePoint,           'group_id': dohody},
       {'name': 'Подарки',        'type': 'income',  'color': 0xFFE91E63, 'icon': Icons.card_giftcard.codePoint,         'group_id': dohody},
-      // Семейные расходы
       {'name': 'Продукты',       'type': 'expense', 'color': 0xFFFF9800, 'icon': Icons.local_grocery_store.codePoint,   'group_id': semya},
       {'name': 'ЖКХ',            'type': 'expense', 'color': 0xFF607D8B, 'icon': Icons.home.codePoint,                  'group_id': semya},
       {'name': 'Транспорт',      'type': 'expense', 'color': 0xFF2196F3, 'icon': Icons.directions_car.codePoint,        'group_id': semya},
@@ -89,12 +98,10 @@ class DatabaseHelper {
       {'name': 'Одежда',         'type': 'expense', 'color': 0xFF795548, 'icon': Icons.checkroom.codePoint,             'group_id': semya},
       {'name': 'Рестораны',      'type': 'expense', 'color': 0xFFFF5722, 'icon': Icons.restaurant.codePoint,            'group_id': semya},
       {'name': 'Связь',          'type': 'expense', 'color': 0xFF00ACC1, 'icon': Icons.phone_android.codePoint,         'group_id': semya},
-      // Расходы на детей
       {'name': 'Дети',           'type': 'expense', 'color': 0xFFFFEB3B, 'icon': Icons.child_care.codePoint,            'group_id': deti},
       {'name': 'Школа',          'type': 'expense', 'color': 0xFF5C6BC0, 'icon': Icons.school.codePoint,                'group_id': deti},
       {'name': 'Садик',          'type': 'expense', 'color': 0xFFEC407A, 'icon': Icons.toys.codePoint,                  'group_id': deti},
       {'name': 'Курсы',          'type': 'expense', 'color': 0xFF26A69A, 'icon': Icons.menu_book.codePoint,             'group_id': deti},
-      // Содержание авто
       {'name': 'Топливо',        'type': 'expense', 'color': 0xFFF57C00, 'icon': Icons.local_gas_station.codePoint,     'group_id': avto},
       {'name': 'Ремонт авто',    'type': 'expense', 'color': 0xFF546E7A, 'icon': Icons.build.codePoint,                 'group_id': avto},
       {'name': 'Страховка авто', 'type': 'expense', 'color': 0xFF78909C, 'icon': Icons.security.codePoint,              'group_id': avto},
@@ -105,21 +112,34 @@ class DatabaseHelper {
     }
   }
 
+  // ── SEED CONSTRUCTION OBJECTS ─────────────────────────
+  Future<void> _seedConstructionObjects() async {
+    if (_cObjects.isNotEmpty) return;
+    final id = _nextId('cobj_id');
+    await _cObjects.put(id, {'id': id, 'name': 'Дом', 'description': null, 'is_active': 1, 'sort_order': 1});
+  }
+
   // ── SEED CONSTRUCTION SECTIONS ───────────────────────
   Future<void> _seedConstructionSections() async {
     if (_cSects.isNotEmpty) return;
+    int? objId;
+    for (final k in _cObjects.keys) {
+      final r = _cObjects.get(k);
+      if (r != null) { objId = (r['id'] as num?)?.toInt(); break; }
+    }
+    objId ??= 1;
     final sections = [
-      {'name': 'Фундамент',       'plan_amount': 420000.0,  'icon': Icons.foundation.codePoint,    'color': 0xFF5D4037, 'sort_order': 1},
-      {'name': 'Плита',           'plan_amount': 340000.0,  'icon': Icons.crop_square.codePoint,   'color': 0xFF795548, 'sort_order': 2},
-      {'name': 'Стена',           'plan_amount': 900000.0,  'icon': Icons.domain.codePoint,        'color': 0xFF8D6E63, 'sort_order': 3},
-      {'name': 'Колонна/Региль',  'plan_amount': 300000.0,  'icon': Icons.view_column.codePoint,   'color': 0xFF6D4C41, 'sort_order': 4},
-      {'name': 'Крыша',           'plan_amount': 600000.0,  'icon': Icons.roofing.codePoint,       'color': 0xFF4E342E, 'sort_order': 5},
-      {'name': 'Прочее',          'plan_amount': 150000.0,  'icon': Icons.more_horiz.codePoint,    'color': 0xFF757575, 'sort_order': 6},
-      {'name': 'Авансы',          'plan_amount': 0.0,       'icon': Icons.payments.codePoint,      'color': 0xFF455A64, 'sort_order': 7},
+      {'name': 'Фундамент',       'plan_amount': 0.0, 'icon': Icons.foundation.codePoint,    'color': 0xFF5D4037, 'sort_order': 1},
+      {'name': 'Плита',           'plan_amount': 0.0, 'icon': Icons.crop_square.codePoint,   'color': 0xFF795548, 'sort_order': 2},
+      {'name': 'Стена',           'plan_amount': 0.0, 'icon': Icons.domain.codePoint,        'color': 0xFF8D6E63, 'sort_order': 3},
+      {'name': 'Колонна/Региль',  'plan_amount': 0.0, 'icon': Icons.view_column.codePoint,   'color': 0xFF6D4C41, 'sort_order': 4},
+      {'name': 'Крыша',           'plan_amount': 0.0, 'icon': Icons.roofing.codePoint,       'color': 0xFF4E342E, 'sort_order': 5},
+      {'name': 'Прочее',          'plan_amount': 0.0, 'icon': Icons.more_horiz.codePoint,    'color': 0xFF757575, 'sort_order': 6},
+      {'name': 'Авансы',          'plan_amount': 0.0, 'icon': Icons.payments.codePoint,      'color': 0xFF455A64, 'sort_order': 7},
     ];
     for (final d in sections) {
       final id = _nextId('csect_id');
-      await _cSects.put(id, {...d, 'id': id});
+      await _cSects.put(id, {...d, 'id': id, 'object_id': objId});
     }
   }
 
@@ -171,6 +191,75 @@ class DatabaseHelper {
       }
     }
     await _meta.put('group_ids_migrated_v1', true);
+  }
+
+  Future<void> _migrateConstructionObjectIds() async {
+    if (_meta.get('csections_obj_migrated_v1') == true) return;
+    int? defaultObjId;
+    for (final k in _cObjects.keys) {
+      final r = _cObjects.get(k);
+      if (r != null) { defaultObjId = (r['id'] as num?)?.toInt(); break; }
+    }
+    if (defaultObjId == null) return;
+    for (final k in _cSects.keys) {
+      final r = _cSects.get(k);
+      if (r == null) continue;
+      final row = Map<String, dynamic>.from(r);
+      if (row['object_id'] == null) {
+        await _cSects.put(k, {...row, 'object_id': defaultObjId});
+      }
+    }
+    await _meta.put('csections_obj_migrated_v1', true);
+  }
+
+  // Migrate old ConstructionItem records (with amount > 0) → ConstructionExpense
+  Future<void> _migrateItemsToExpenses() async {
+    if (_meta.get('citems_to_expenses_v1') == true) return;
+    for (final key in _cItems.keys) {
+      final r = _cItems.get(key);
+      if (r == null) continue;
+      final row = Map<String, dynamic>.from(r);
+      final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+      if (amount <= 0) continue;
+      final itemId = (row['id'] as num?)?.toInt();
+      if (itemId == null) continue;
+      final expId = _nextId('cexp_id');
+      await _cExps.put(expId, {
+        'id':          expId,
+        'item_id':     itemId,
+        'qty':         (row['qty'] as num?)?.toDouble() ?? 1,
+        'unit':        row['unit'] as String? ?? 'шт',
+        'price':       (row['price'] as num?)?.toDouble() ?? 0,
+        'amount':      amount,
+        'currency':    row['currency'] as String? ?? 'KGS',
+        'description': row['description'],
+        'date':        row['date'],
+      });
+    }
+    await _meta.put('citems_to_expenses_v1', true);
+  }
+
+  Future<void> _removeConstructionGroup() async {
+    if (_meta.get('remove_construction_group_v1') == true) return;
+    for (final key in _groups.keys.toList()) {
+      final raw = _groups.get(key);
+      if (raw == null) continue;
+      final row = Map<String, dynamic>.from(raw);
+      if (row['name'] == 'Строительство дома') {
+        final groupId = (row['id'] as num?)?.toInt();
+        await _groups.delete(key);
+        if (groupId != null) {
+          for (final ck in _cats.keys.toList()) {
+            final cr = _cats.get(ck);
+            if (cr == null) continue;
+            if ((cr['group_id'] as num?)?.toInt() == groupId) {
+              await _cats.delete(ck);
+            }
+          }
+        }
+      }
+    }
+    await _meta.put('remove_construction_group_v1', true);
   }
 
   Map<String, int> _groupNameToId() {
@@ -329,9 +418,41 @@ class DatabaseHelper {
     await _plans.delete(id);
   }
 
+  // ── CONSTRUCTION OBJECTS ─────────────────────────────
+  Future<List<ConstructionObject>> getConstructionObjects() async {
+    return _cObjects.values
+        .map((r) => ConstructionObject.fromMap(Map<String, dynamic>.from(r)))
+        .toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
+
+  Future<int> insertConstructionObject(ConstructionObject obj) async {
+    final id = _nextId('cobj_id');
+    await _cObjects.put(id, {...obj.toMap(), 'id': id});
+    return id;
+  }
+
+  Future<void> updateConstructionObject(ConstructionObject obj) async {
+    await _cObjects.put(obj.id, obj.toMap());
+  }
+
+  Future<void> deleteConstructionObject(int id) async {
+    await _cObjects.delete(id);
+    final sectKeys = List.from(_cSects.keys.where((k) {
+      final r = _cSects.get(k);
+      return r != null && (r['object_id'] as num?)?.toInt() == id;
+    }));
+    for (final sk in sectKeys) {
+      final sid = (_cSects.get(sk)?['id'] as num?)?.toInt();
+      await _cSects.delete(sk);
+      if (sid != null) await _deleteExpensesForSection(sid);
+    }
+  }
+
   // ── CONSTRUCTION SECTIONS ────────────────────────────
-  Future<List<ConstructionSection>> getConstructionSections() async {
+  Future<List<ConstructionSection>> getConstructionSections({int? objectId}) async {
     return _cSects.values
+        .where((r) => objectId == null || (r['object_id'] as num?)?.toInt() == objectId)
         .map((r) => ConstructionSection.fromMap(Map<String, dynamic>.from(r)))
         .toList()
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
@@ -349,31 +470,35 @@ class DatabaseHelper {
 
   Future<void> deleteConstructionSection(int id) async {
     await _cSects.delete(id);
-    for (final k in List.from(_cItems.keys)) {
+    await _deleteExpensesForSection(id);
+  }
+
+  Future<void> _deleteExpensesForSection(int sectionId) async {
+    final itemKeys = List.from(_cItems.keys.where((k) {
       final r = _cItems.get(k);
-      if (r != null && (r['section_id'] as num?)?.toInt() == id) {
-        await _cItems.delete(k);
-      }
+      return r != null && (r['section_id'] as num?)?.toInt() == sectionId;
+    }));
+    for (final ik in itemKeys) {
+      final itemId = (_cItems.get(ik)?['id'] as num?)?.toInt();
+      await _cItems.delete(ik);
+      if (itemId != null) await _deleteExpensesForItem(itemId);
     }
   }
 
   // ── CONSTRUCTION ITEMS ───────────────────────────────
+  Future<List<ConstructionItem>> getAllConstructionItems() async {
+    return _cItems.values
+        .map((r) => ConstructionItem.fromMap(Map<String, dynamic>.from(r)))
+        .toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
+
   Future<List<ConstructionItem>> getConstructionItems(int sectionId) async {
     return _cItems.values
         .where((r) => (r['section_id'] as num?)?.toInt() == sectionId)
         .map((r) => ConstructionItem.fromMap(Map<String, dynamic>.from(r)))
         .toList()
-      ..sort((a, b) => (a.date ?? DateTime(2000)).compareTo(b.date ?? DateTime(2000)));
-  }
-
-  Future<Map<int, double>> getConstructionTotals() async {
-    final result = <int, double>{};
-    for (final r in _cItems.values) {
-      final sid = (r['section_id'] as num?)?.toInt();
-      if (sid == null) continue;
-      result[sid] = (result[sid] ?? 0) + (r['amount'] as num).toDouble();
-    }
-    return result;
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
   }
 
   Future<int> insertConstructionItem(ConstructionItem item) async {
@@ -388,6 +513,74 @@ class DatabaseHelper {
 
   Future<void> deleteConstructionItem(int id) async {
     await _cItems.delete(id);
+    await _deleteExpensesForItem(id);
+  }
+
+  // ── CONSTRUCTION EXPENSES ────────────────────────────
+  Future<List<ConstructionExpense>> getAllConstructionExpenses() async {
+    return _cExps.values
+        .map((r) => ConstructionExpense.fromMap(Map<String, dynamic>.from(r)))
+        .toList()
+      ..sort((a, b) => (a.date ?? DateTime(2000)).compareTo(b.date ?? DateTime(2000)));
+  }
+
+  Future<List<ConstructionExpense>> getConstructionExpenses(int itemId) async {
+    return _cExps.values
+        .where((r) => (r['item_id'] as num?)?.toInt() == itemId)
+        .map((r) => ConstructionExpense.fromMap(Map<String, dynamic>.from(r)))
+        .toList()
+      ..sort((a, b) => (a.date ?? DateTime(2000)).compareTo(b.date ?? DateTime(2000)));
+  }
+
+  Future<int> insertConstructionExpense(ConstructionExpense exp) async {
+    final id = _nextId('cexp_id');
+    await _cExps.put(id, {...exp.toMap(), 'id': id});
+    return id;
+  }
+
+  Future<void> updateConstructionExpense(ConstructionExpense exp) async {
+    await _cExps.put(exp.id, exp.toMap());
+  }
+
+  Future<void> deleteConstructionExpense(int id) async {
+    await _cExps.delete(id);
+  }
+
+  Future<void> _deleteExpensesForItem(int itemId) async {
+    final keys = List.from(_cExps.keys.where((k) {
+      final r = _cExps.get(k);
+      return r != null && (r['item_id'] as num?)?.toInt() == itemId;
+    }));
+    for (final k in keys) await _cExps.delete(k);
+  }
+
+  // ── CONSTRUCTION TOTALS (from expenses, via items→sections) ─────────────────
+  Future<Map<int, double>> getConstructionTotals() async {
+    final itemToSection = <int, int>{};
+    for (final r in _cItems.values) {
+      final id  = (r['id'] as num?)?.toInt();
+      final sid = (r['section_id'] as num?)?.toInt();
+      if (id != null && sid != null) itemToSection[id] = sid;
+    }
+    final result = <int, double>{};
+    for (final r in _cExps.values) {
+      final iid = (r['item_id'] as num?)?.toInt();
+      if (iid == null) continue;
+      final sid = itemToSection[iid];
+      if (sid == null) continue;
+      result[sid] = (result[sid] ?? 0) + (r['amount'] as num).toDouble();
+    }
+    return result;
+  }
+
+  Future<Map<int, double>> getExpenseTotals() async {
+    final result = <int, double>{};
+    for (final r in _cExps.values) {
+      final iid = (r['item_id'] as num?)?.toInt();
+      if (iid == null) continue;
+      result[iid] = (result[iid] ?? 0) + (r['amount'] as num).toDouble();
+    }
+    return result;
   }
 
   // ── ANALYTICS ────────────────────────────────────────

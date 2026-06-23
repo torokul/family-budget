@@ -91,6 +91,7 @@ class GroupDetailScreen extends StatelessWidget {
                     onTap: () => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => AddTransactionScreen(
                         preselectedCategoryId: cat.id,
+                        preselectedType: cat.type,
                       ))),
                   )),
                 ],

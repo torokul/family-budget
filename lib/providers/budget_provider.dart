@@ -4,8 +4,10 @@ import '../models/category.dart';
 import '../models/transaction.dart' as m;
 import '../models/plan.dart';
 import '../models/group.dart';
+import '../models/construction_object.dart';
 import '../models/construction_section.dart';
 import '../models/construction_item.dart';
+import '../models/construction_expense.dart';
 import '../services/currency_service.dart';
 
 class BudgetProvider extends ChangeNotifier {
@@ -16,8 +18,13 @@ class BudgetProvider extends ChangeNotifier {
   List<Category>           _categories   = [];
   List<m.Transaction>      _transactions = [];
   List<Plan>               _plans        = [];
+  List<ConstructionObject>  _cObjects     = [];
   List<ConstructionSection> _cSections   = [];
-  Map<int, double>         _cTotals      = {};
+  List<ConstructionItem>    _cItems       = [];
+  List<ConstructionExpense> _cExpenses   = [];
+  Map<int, double>          _cTotals     = {};
+  Map<int, double>          _cPlanTotals = {};
+  Map<int, double>          _cExpTotals  = {};
   Map<String, double>      _rates        = CurrencyService.defaults;
 
   DateTime _from = DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -28,8 +35,13 @@ class BudgetProvider extends ChangeNotifier {
   List<Category>           get categories   => _categories;
   List<m.Transaction>      get transactions => _transactions;
   List<Plan>               get plans        => _plans;
+  List<ConstructionObject>  get cObjects     => _cObjects;
   List<ConstructionSection> get cSections   => _cSections;
-  Map<int, double>         get cTotals      => _cTotals;
+  List<ConstructionItem>    get cItems       => _cItems;
+  List<ConstructionExpense> get cExpenses   => _cExpenses;
+  Map<int, double>          get cTotals     => _cTotals;
+  Map<int, double>          get cPlanTotals => _cPlanTotals;
+  Map<int, double>          get cExpTotals  => _cExpTotals;
   Map<String, double>      get rates        => _rates;
   DateTime                 get from         => _from;
   DateTime                 get to           => _to;
@@ -85,9 +97,45 @@ class BudgetProvider extends ChangeNotifier {
   }
 
   Future<void> loadConstruction() async {
+    _cObjects  = await _db.getConstructionObjects();
     _cSections = await _db.getConstructionSections();
+    _cItems    = await _db.getAllConstructionItems();
+    _cExpenses = await _db.getAllConstructionExpenses();
     _cTotals   = await _db.getConstructionTotals();
+    _cExpTotals = {};
+    for (final exp in _cExpenses) {
+      _cExpTotals[exp.itemId] = (_cExpTotals[exp.itemId] ?? 0) + exp.amount;
+    }
+    _cPlanTotals = {};
+    for (final item in _cItems) {
+      _cPlanTotals[item.sectionId] = (_cPlanTotals[item.sectionId] ?? 0) + item.planAmount;
+    }
     notifyListeners();
+  }
+
+  List<ConstructionSection> sectionsForObject(int objectId) =>
+      _cSections.where((s) => s.objectId == objectId).toList();
+
+  List<ConstructionItem> itemsForSection(int sectionId) =>
+      _cItems.where((i) => i.sectionId == sectionId).toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+
+  List<ConstructionExpense> expensesForItem(int itemId) =>
+      _cExpenses.where((e) => e.itemId == itemId).toList()
+        ..sort((a, b) => (a.date ?? DateTime(2000)).compareTo(b.date ?? DateTime(2000)));
+
+  double objectPlan(int objectId) {
+    final secIds = sectionsForObject(objectId).map((s) => s.id).toSet();
+    return _cPlanTotals.entries
+        .where((e) => secIds.contains(e.key))
+        .fold(0.0, (s, e) => s + e.value);
+  }
+
+  double objectFact(int objectId) {
+    final secIds = sectionsForObject(objectId).map((s) => s.id).toSet();
+    return _cTotals.entries
+        .where((e) => secIds.contains(e.key))
+        .fold(0, (s, e) => s + e.value);
   }
 
   void setMonth(int year, int month) {
@@ -107,14 +155,20 @@ class BudgetProvider extends ChangeNotifier {
   List<Category> categoriesForGroup(int groupId) =>
       _categories.where((c) => c.groupId == groupId).toList();
 
-  double spentForCategory(int categoryId) => _transactions
-      .where((t) => t.type == 'expense' && t.categoryId == categoryId)
-      .fold(0, (s, t) => s + toKgs(t.amount, t.currency));
+  double spentForCategory(int categoryId) {
+    final cat    = _categories.where((c) => c.id == categoryId).firstOrNull;
+    final txType = (cat?.type == 'income') ? 'income' : 'expense';
+    return _transactions
+        .where((t) => t.type == txType && t.categoryId == categoryId)
+        .fold(0, (s, t) => s + toKgs(t.amount, t.currency));
+  }
 
   double spentForGroup(int groupId) {
+    final group  = _groups.where((g) => g.id == groupId).firstOrNull;
+    final txType = (group?.type == 'income') ? 'income' : 'expense';
     final catIds = categoriesForGroup(groupId).map((c) => c.id).toSet();
     return _transactions
-        .where((t) => t.type == 'expense' && catIds.contains(t.categoryId))
+        .where((t) => t.type == txType && catIds.contains(t.categoryId))
         .fold(0, (s, t) => s + toKgs(t.amount, t.currency));
   }
 
@@ -192,9 +246,6 @@ class BudgetProvider extends ChangeNotifier {
   }
 
   // ── Construction ──────────────────────────────────────
-  Future<List<ConstructionItem>> getConstructionItems(int sectionId) =>
-      _db.getConstructionItems(sectionId);
-
   Future<void> addConstructionItem(ConstructionItem item) async {
     await _db.insertConstructionItem(item);
     await loadConstruction();
@@ -207,6 +258,21 @@ class BudgetProvider extends ChangeNotifier {
 
   Future<void> deleteConstructionItem(int id) async {
     await _db.deleteConstructionItem(id);
+    await loadConstruction();
+  }
+
+  Future<void> addConstructionObject(ConstructionObject obj) async {
+    await _db.insertConstructionObject(obj);
+    await loadConstruction();
+  }
+
+  Future<void> updateConstructionObject(ConstructionObject obj) async {
+    await _db.updateConstructionObject(obj);
+    await loadConstruction();
+  }
+
+  Future<void> deleteConstructionObject(int id) async {
+    await _db.deleteConstructionObject(id);
     await loadConstruction();
   }
 
@@ -225,6 +291,22 @@ class BudgetProvider extends ChangeNotifier {
     await loadConstruction();
   }
 
+  // ── Construction Expenses ─────────────────────────────
+  Future<void> addConstructionExpense(ConstructionExpense exp) async {
+    await _db.insertConstructionExpense(exp);
+    await loadConstruction();
+  }
+
+  Future<void> updateConstructionExpense(ConstructionExpense exp) async {
+    await _db.updateConstructionExpense(exp);
+    await loadConstruction();
+  }
+
+  Future<void> deleteConstructionExpense(int id) async {
+    await _db.deleteConstructionExpense(id);
+    await loadConstruction();
+  }
+
   // ── Analytics ─────────────────────────────────────────
   Future<Map<int, double>> getSumByCategory(String type) async {
     final result = <int, double>{};
@@ -236,4 +318,8 @@ class BudgetProvider extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> getMonthlyTotals() => _db.getMonthlyTotals(6);
+
+  Future<List<m.Transaction>> fetchTransactions({
+    DateTime? from, DateTime? to, String? type,
+  }) => _db.getTransactions(from: from, to: to, type: type);
 }
